@@ -17,6 +17,15 @@ class SensorsApp extends LitElement {
   constructor() {
     super();
     this.sensorDataModel = [];
+    this.sensorDataCSV = "";
+    this.isStartRecord = false;
+    this.isSuspendRecord = false;
+    this.isStopRecord = false;
+    this.recordNum = 0;
+    this.csvList = [];
+    this.csvNameList = [];
+    this.downloadNum = 0;
+    this.startTimestamp = "";
   }
 
   openAddSensorDialog() {
@@ -29,6 +38,8 @@ class SensorsApp extends LitElement {
     this.selectedFrequency = this.shadowRoot.querySelector('#selectedFrequency');
     this.toastPleaseSelectSensor = this.shadowRoot.querySelector('#toastPleaseSelectSensor');
     this.toastNotSupported = this.shadowRoot.querySelector('#toastNotSupported');
+    this.recordDivElement = this.shadowRoot.querySelector('#recordDiv');
+    this.recordDivElement.className = "toggle item block";
     let options = null;
     let sensorConstructor = null;
 
@@ -109,6 +120,25 @@ class SensorsApp extends LitElement {
           }
         }
       }
+
+      // Add records for download csv
+      if (this.isStartRecord && !this.isSuspendRecord && !this.isStopRecord) {
+        let record = `${sensorConstructor.name},`;
+        record += `${sensor.frequency == "default" ? 60 : options.frequency},`;
+        record += `${sensor.timestamp},`;
+        if (sensor.name == "Ambient light") {
+          record += `${sensor.illuminance}\n`;
+        } else if (sensor.name == "AbsoluteOrientation" || sensor.name == "RelativeOrientation") {
+          record += `,,,,${sensor.quaternion[0]},${sensor.quaternion[1]},${sensor.quaternion[2]},${sensor.quaternion[3]}\n`;
+        } else {
+          record += `,${sensor.x},${sensor.y},${sensor.z}\n`;
+        }
+        this.sensorDataCSV += record;
+        this.recordNum++;
+        this.requestUpdate('recordNum');
+        this.requestUpdate('sensorDataCSV');
+      }
+
       this.requestUpdate('sensorDataModel');
     }
 
@@ -163,6 +193,84 @@ class SensorsApp extends LitElement {
     this.requestUpdate('sensorDataModel');
   }
 
+  startRecord() {
+    this.isStartRecord = true;
+    this.isSuspendRecord = false;
+    this.isStopRecord = false;
+    this.recordNum = 0;
+    this.downloadNum = 0;
+
+    let suspendElement = this.shadowRoot.querySelector('#suspendRecord');
+    suspendElement.className = "blue";
+    suspendElement.label = "Suspend";
+    let stopElement = this.shadowRoot.querySelector('#stopRecord');
+    stopElement.className = "blue";
+    let downloadElement = this.shadowRoot.querySelector('#downloadRecord');
+    downloadElement.className = "blue";
+
+    this.sensorDataCSV = "data:text/csv;charset=utf-8,"
+                       + "SensorType,frequency,timestamp,illuminance,x,y,z,"
+                       + "quaternion.x,quaternion.y,quaternion.z,quaternion.w\n";
+    this.startTimestamp = Math.floor(Date.now() / 1000);
+    let csvName = this.shadowRoot.querySelector('#csvName');
+    csvName.value = `sensor_${this.startTimestamp}.csv`;
+  }
+
+  suspendRecord() {
+    let suspendElement = this.shadowRoot.querySelector('#suspendRecord');
+    if (suspendElement.className == "gray") return;
+
+    if (suspendElement.label == "Suspend") {
+      suspendElement.label = "Resume";
+      this.isSuspendRecord = true;
+    } else {
+      suspendElement.label = "Suspend";
+      this.isSuspendRecord = false;
+    }
+  }
+
+  stopRecord() {
+    let stopElement = this.shadowRoot.querySelector('#stopRecord');
+    if (stopElement.className == "gray") return;
+    stopElement.className = "gray";
+
+    let suspendElement = this.shadowRoot.querySelector('#suspendRecord');
+    suspendElement.label = "Suspend";
+    suspendElement.className = "gray";
+
+    this.isStartRecord = false;
+    this.isSuspendRecord = false;
+    this.isStopRecord = true;
+  }
+
+  downloadRecord() {
+    let downloadElement = this.shadowRoot.querySelector('#downloadRecord');
+    if (downloadElement.className == "gray") return;
+
+    let csvName = this.shadowRoot.querySelector('#csvName');
+    let name = csvName.value;
+
+    if (this.csvNameList.includes(name)) {
+      alert("The csv name is exist, please change a new one.");
+      return;
+    }
+    if (!name.endsWith(".csv")) {
+      name += ".csv";
+    }
+    this.csvList.push([name, this.recordNum]);
+    this.csvNameList.push(name);
+
+    let encodedUri = encodeURI(this.sensorDataCSV);
+    let link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", name);
+    link.click();
+    this.requestUpdate('csvList');
+
+    this.downloadNum++;
+    csvName.value = `sensor_${this.startTimestamp}_${this.downloadNum}.csv`;
+  }
+
   static get styles() {
     return css`
         :host {
@@ -208,11 +316,46 @@ class SensorsApp extends LitElement {
           display: inline-block;
         }
 
+        .hidden {
+          display: none;
+        }
+
+        .block {
+          display: block;
+        }
+
         .blue {
           --mdc-theme-on-primary: white;
           --mdc-theme-primary: #3f51b5;
           --mdc-theme-on-secondary: white;
           --mdc-theme-secondary: #3f51b5;
+        }
+
+        .gray {
+          --mdc-theme-on-primary: white;
+          --mdc-theme-primary: rgba(0,0,0,0.37);
+          --mdc-theme-on-secondary: white;
+          --mdc-theme-secondary: rgba(0,0,0,0.37);
+          cursor: pointer;
+        }
+
+        table {
+          border-collapse: collapse;
+          font-size: 13.3333px;
+          width: 100%;
+        }
+
+        table, th, td {
+          border: 1px solid #a8a8a8;
+        }
+
+        table, th, td {
+          border: 1px solid #a8a8a8;
+        }
+
+        .recordNum {
+          font-size: 13.3333px;
+          font-style: italic;
         }
     `;
   }
@@ -246,6 +389,20 @@ class SensorsApp extends LitElement {
               <mwc-icon id="${item.id}" @click="${this.removeSensor}" class="push-right">clear</mwc-icon>
             </div>
           `)}
+
+          <div class="hidden" id="recordDiv">
+            <mwc-button class="blue" dense @click="${this.startRecord}" label="Start Record"></mwc-button>
+            <mwc-button class="gray" dense id="suspendRecord" @click="${this.suspendRecord}" label="Suspend"></mwc-button>
+            <mwc-button class="gray" dense id="stopRecord" @click="${this.stopRecord}" label="Stop"></mwc-button><br>
+            <input id="csvName"/><mwc-button class="gray" dense id="downloadRecord" @click="${this.downloadRecord}" label="Download"></mwc-button>
+            <p class="recordNum">The number of current records is ${this.recordNum}<br><br></p>
+            <table>
+              <tr><th width="60%">CSV Name</td><th>Record Number</td></tr>
+              ${this.csvList && this.csvList.map((item, index) => html`
+                <tr><td>${item[0]}</td><td>${item[1]}</td></tr>
+              `)}
+            </table>
+          </div>
         </div>
       </app-header-layout>
 
@@ -267,8 +424,8 @@ class SensorsApp extends LitElement {
         </paper-dropdown-menu-light>
         <paper-input id="selectedFrequency" label="Frequency"></paper-input>
         <div class="buttons">
-          <mwc-button class="blue" dialog-confirm @click="${this.addSensor}">Add</mwc-button>
-          <mwc-button class="blue" dialog-confirm autofocus>Cancel</mwc-button>
+          <mwc-button class="blue" dialog-confirm @click="${this.addSensor}" label="Add"></mwc-button>
+          <mwc-button class="blue" dialog-confirm autofocus label="Cancel"></mwc-button>
         </div>
       </paper-dialog>
     `;
